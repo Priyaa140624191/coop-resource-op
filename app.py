@@ -1,7 +1,10 @@
 import streamlit as st
+import pandas as pd
 import resource_op as ro
 import plotly.express as px
 import plotly.graph_objects as go
+import folium
+from streamlit_folium import folium_static
 
 # Improved visualization for cost comparison
 def visualize_cost_savings_waterfall(comparison_results):
@@ -74,20 +77,6 @@ def main():
             st.write("Crosstab:")
             st.dataframe(crosstab)
 
-        if st.checkbox("Show Store Locations on Map"):
-            ro.plot_store_locations(df)
-            # Get clustering parameters
-            eps_miles = st.slider("Set the distance threshold (miles) for clustering", min_value=0.1, max_value=50.0,
-                                  value=10.0, step=0.1)
-
-            # Perform clustering
-            labels = ro.perform_clustering(df, eps_miles)
-            df['Cluster'] = labels  # Add cluster labels to the DataFrame
-
-            # Plot clusters
-            st.write(f"Clusters based on a {eps_miles} mile threshold:")
-            ro.plot_clusters(df, labels)
-
         # Step 2: Show idle time analysis by store type
         idle_time_results = ro.calculate_idle_time_by_store_type(df)
         st.write("Idle Time Analysis by Store Type:")
@@ -159,6 +148,41 @@ def main():
     comparison_results = ro.compare_fixed_vs_mobile(df)
     st.plotly_chart(visualize_cost_savings_waterfall(comparison_results))
 
+    #Clusters
+    if st.checkbox("Show Store Locations on Map"):
+        ro.plot_store_locations(df)
+        # Get clustering parameters
+        eps_miles = st.slider("Set the distance threshold (miles) for clustering", min_value=0.1, max_value=50.0,
+                              value=10.0, step=0.1)
+
+        # Perform clustering
+        labels = ro.perform_clustering(df, eps_miles)
+        df['Cluster'] = labels  # Add cluster labels to the DataFrame
+
+        # Plot clusters
+        st.write(f"Clusters based on a {eps_miles} mile threshold:")
+        ro.plot_clusters(df, labels)
+
+    # Optimal path
+    # Convert columns to numeric if needed
+    df['latitude'] = pd.to_numeric(df['latitude'], errors='coerce')
+    df['longitude'] = pd.to_numeric(df['longitude'], errors='coerce')
+
+    if st.button("Show Approximate Cleaning Path for 100 Stores"):
+        # Get the optimal path using nearest neighbor for the first 100 stores
+        optimal_path = ro.nearest_neighbor_tsp(df, start_index=0, num_stores=100)
+        # Visualize the path using Folium
+        optimal_path_map = ro.visualize_optimal_path_folium(df, optimal_path)
+        # Display the map in Streamlit
+        folium_static(optimal_path_map)
+
+    if st.button("Show Optimal Cleaning Path with Road Routes"):
+        # Get the optimal path (for simplicity, let's assume Nearest Neighbor is used)
+        optimal_path = ro.nearest_neighbor_tsp(df, start_index=0, num_stores=100)
+        # Visualize the path using Folium
+        road_route_map = ro.visualize_route_on_map(df, optimal_path)
+        # Display the map in Streamlit
+        folium_static(road_route_map)
 
 # Run the app
 if __name__ == "__main__":
