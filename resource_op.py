@@ -1,4 +1,6 @@
 import pandas as pd
+import numpy as np
+import plotly.graph_objects as go
 
 def load_data(file_path):
     """
@@ -348,3 +350,121 @@ def compare_fixed_vs_mobile(df, hourly_rate=13.77, travel_time_minutes=30, work_
     }
 
     return results
+
+
+def nearest_neighbor_tsp(df, start_index=0, num_stores=100):
+    """
+    Approximate TSP solution using the Nearest Neighbor algorithm for a given number of stores.
+    """
+    # Limit to specified number of stores (default to 100)
+    subset_df = df.iloc[:num_stores].reset_index(drop=True)
+
+    # Initialize
+    unvisited = set(range(len(subset_df)))
+    path = [start_index]
+    unvisited.remove(start_index)
+    current_index = start_index
+
+    while unvisited:
+        # Find the nearest neighbor
+        nearest_index = min(unvisited, key=lambda i: np.hypot(
+            subset_df.iloc[i]['latitude'] - subset_df.iloc[current_index]['latitude'],
+            subset_df.iloc[i]['longitude'] - subset_df.iloc[current_index]['longitude']
+        ))
+        # Update path
+        path.append(nearest_index)
+        unvisited.remove(nearest_index)
+        current_index = nearest_index
+
+    return path
+
+
+def visualize_optimal_path_folium(df, optimal_path):
+    # Create a map centered at the average latitude and longitude
+    map_center = [df['latitude'].mean(), df['longitude'].mean()]
+    store_map = folium.Map(location=map_center, zoom_start=9)
+
+    # Plot the stores as markers
+    for index in optimal_path:
+        row = df.iloc[index]
+        store_ref = row.get('Karcher reference', 'Unknown')
+        postcode = row.get('Postcode', 'Unknown')
+        folium.Marker(
+            location=[row['latitude'], row['longitude']],
+            popup=f"Store {index}, Store Ref: {store_ref}, Postcode: {postcode}",
+            icon=folium.Icon(color='green', icon='fa-shopping-basket', prefix='fa')
+        ).add_to(store_map)
+
+    # Draw the optimal path
+    path_coordinates = [(df.iloc[i]['latitude'], df.iloc[i]['longitude']) for i in optimal_path]
+    folium.PolyLine(
+        locations=path_coordinates,
+        color='red',
+        weight=5,
+        opacity=0.7
+    ).add_to(store_map)
+
+    return store_map
+
+#osrm
+
+import requests
+
+import time
+
+def get_route_via_osrm(lat1, lon1, lat2, lon2, retries=3):
+    """
+    Get the driving route from point A (lat1, lon1) to point B (lat2, lon2) using OSRM, with retry logic.
+    """
+    url = f"http://router.project-osrm.org/route/v1/driving/{lon1},{lat1};{lon2},{lat2}?overview=full&geometries=geojson"
+    for attempt in range(retries):
+        response = requests.get(url)
+        data = response.json()
+
+        if response.status_code == 200 and 'routes' in data and data['routes']:
+            route_geometry = data['routes'][0]['geometry']['coordinates']
+            return route_geometry
+        else:
+            print(f"Error fetching route from {lat1},{lon1} to {lat2},{lon2}, attempt {attempt + 1}")
+            time.sleep(1)  # Delay before retrying
+
+    return None  # Return None if all retries fail
+
+
+import folium
+
+def visualize_route_on_map(df, optimal_path):
+    # Create a map centered at the average latitude and longitude
+    map_center = [df['latitude'].mean(), df['longitude'].mean()]
+    store_map = folium.Map(location=map_center, zoom_start=6)
+
+    # Plot the stores as markers
+    for index in optimal_path:
+        row = df.iloc[index]
+        store_ref = row.get('Karcher reference', 'Unknown')
+        postcode = row.get('Postcode', 'Unknown')
+        folium.Marker(
+            location=[row['latitude'], row['longitude']],
+            popup=f"Store {index}, Store Ref: {store_ref}, Postcode: {postcode}",
+            icon=folium.Icon(color='green', icon='fa-shopping-basket', prefix='fa')
+        ).add_to(store_map)
+
+    # Draw the road routes between stores
+    for i in range(len(optimal_path) - 1):
+        start_index = optimal_path[i]
+        end_index = optimal_path[i + 1]
+        start_lat, start_lon = df.iloc[start_index]['latitude'], df.iloc[start_index]['longitude']
+        end_lat, end_lon = df.iloc[end_index]['latitude'], df.iloc[end_index]['longitude']
+
+        # Get the route via OSRM
+        route = get_route_via_osrm(start_lat, start_lon, end_lat, end_lon)
+
+        if route:
+            folium.PolyLine(
+                locations=[(lat, lon) for lon, lat in route],  # Flip to (lat, lon)
+                color='red',
+                weight=5,
+                opacity=0.7
+            ).add_to(store_map)
+
+    return store_map
